@@ -13,6 +13,7 @@ interface Suggestion {
 
 export default function Home() {
   const [query, setQuery] = useState("");
+  const [currentInputText, setCurrentInputText] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [activeIndex, setActiveIndex] = useState(-1);
   const listRef = useRef<HTMLUListElement>(null);
@@ -21,23 +22,20 @@ export default function Home() {
   const parseHTMLSuggestions = useCallback((html: string): Suggestion[] => {
     const doc = new DOMParser().parseFromString(html, "text/html");
     const items = doc.querySelectorAll("li.ui-menu-item");
-    const results: Suggestion[] = [];
-    items.forEach((item) => {
-      const type = item.getAttribute("data-autocomplete-type") || undefined;
+    return Array.from(items).map((item) => {
       const value = item.getAttribute("data-autocomplete-value") || undefined;
       const postCount = item.querySelector(".post-count");
       const tagClass = item.querySelector("a")?.classList.item(0);
       const antecedent = item.querySelector(".autocomplete-antecedent span:nth-child(2)");
-      results.push({
+      return {
         label: value,
         searchName: value,
-        type,
+        type: item.getAttribute("data-autocomplete-type") || undefined,
         post_count: postCount?.textContent?.trim(),
         category: tagClass ? parseInt(tagClass.split("-").pop() || "0", 10) : 0,
         antecedent: antecedent?.textContent?.trim(),
-      });
+      };
     });
-    return results;
   }, []);
 
   useEffect(() => {
@@ -50,13 +48,10 @@ export default function Home() {
         `https://danbooru.donmai.us/autocomplete?search%5Bquery%5D=${encodeURIComponent(query)}&search%5Btype%5D=tag_query&version=1&limit=20`,
         { signal: controller.signal }
     )
-        .then((res) => {
-          if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-          return res.text();
-        })
+        .then((res) => res.ok ? res.text() : Promise.reject(`HTTP error! status: ${res.status}`))
         .then((html) => setSuggestions(parseHTMLSuggestions(html)))
         .catch((err) => {
-          if (err.name === "AbortError") return;
+          if (err?.name === "AbortError") return;
           console.error(err);
         });
     return () => controller.abort();
@@ -64,12 +59,28 @@ export default function Home() {
 
   useEffect(() => {
     if (activeIndex >= 0 && listRef.current?.children[activeIndex]) {
-      (listRef.current.children[activeIndex] as HTMLLIElement).scrollIntoView({
+      listRef.current.children[activeIndex].scrollIntoView({
         behavior: "smooth",
         block: "nearest",
       });
     }
   }, [activeIndex]);
+
+  const updateInputValue = useCallback((selectedSuggestion: string) => {
+    const inputValue = currentInputText;
+    const cursorPosition = inputRef.current?.selectionStart || 0;
+    const lastCommaIndex = inputValue.lastIndexOf(',', cursorPosition - 1);
+    const updatedValue = lastCommaIndex !== -1
+        ? inputValue.substring(0, lastCommaIndex + 1) + " " + selectedSuggestion + inputValue.substring(cursorPosition)
+        : selectedSuggestion + inputValue.substring(cursorPosition);
+
+    setQuery("");
+    setCurrentInputText(updatedValue);
+    setSuggestions([]);
+    setActiveIndex(-1);
+    inputRef.current?.blur();
+  }, [currentInputText]);
+
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!suggestions.length) return;
@@ -81,11 +92,8 @@ export default function Home() {
       setActiveIndex((prev) => (prev - 1 >= 0 ? prev - 1 : suggestions.length - 1));
     } else if (e.key === "Tab" || e.key === "Enter") {
       e.preventDefault();
-      if (activeIndex >= 0 && activeIndex < suggestions.length) {
-        setQuery(suggestions[activeIndex].searchName || suggestions[activeIndex].label || "");
-        setSuggestions([]);
-        setActiveIndex(-1);
-        inputRef.current?.blur();
+      if (activeIndex >= 0) {
+        updateInputValue(suggestions[activeIndex].searchName || suggestions[activeIndex].label || "");
       }
     } else if (e.key === "Escape") {
       setSuggestions([]);
@@ -95,22 +103,30 @@ export default function Home() {
   };
 
   const handleSuggestionClick = useCallback((item: Suggestion) => {
-    setQuery(item.searchName || item.label || "");
-    setSuggestions([]);
+    updateInputValue(item.searchName || item.label || "");
+  }, [updateInputValue]);
+
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const inputValue = e.target.value;
+    setCurrentInputText(inputValue);
+    const cursorPosition = inputRef.current?.selectionStart || 0;
+    const lastCommaIndex = inputValue.lastIndexOf(',', cursorPosition - 1);
+    const currentQuery = lastCommaIndex !== -1
+        ? inputValue.substring(lastCommaIndex + 1, cursorPosition).trim()
+        : inputValue.substring(0, cursorPosition).trim();
+
+    setQuery(currentQuery);
     setActiveIndex(-1);
-    inputRef.current?.blur();
   }, []);
+
 
   return (
       <Box width="400px" mx="auto" mt="50px" position="relative">
         <Input
             ref={inputRef}
             type="text"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setActiveIndex(-1);
-            }}
+            value={currentInputText}
+            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             placeholder="Cari tag..."
             size="md"
