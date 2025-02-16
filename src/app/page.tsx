@@ -16,6 +16,7 @@ export default function Home() {
   const [currentInputText, setCurrentInputText] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [suggestionText, setSuggestionText] = useState("");
   const listRef = useRef<HTMLUListElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -41,6 +42,7 @@ export default function Home() {
   useEffect(() => {
     if (!query) {
       setSuggestions([]);
+      setSuggestionText("");
       return;
     }
     const controller = new AbortController();
@@ -49,10 +51,19 @@ export default function Home() {
         { signal: controller.signal }
     )
         .then((res) => res.ok ? res.text() : Promise.reject(`HTTP error! status: ${res.status}`))
-        .then((html) => setSuggestions(parseHTMLSuggestions(html)))
+        .then((html) => {
+          const parsedSuggestions = parseHTMLSuggestions(html);
+          setSuggestions(parsedSuggestions);
+          if (parsedSuggestions.length > 0 && parsedSuggestions[0].label?.startsWith(query)) {
+            setSuggestionText(parsedSuggestions[0].label.substring(query.length) || "");
+          } else {
+            setSuggestionText("");
+          }
+        })
         .catch((err) => {
           if (err?.name === "AbortError") return;
           console.error(err);
+          setSuggestionText("");
         });
     return () => controller.abort();
   }, [query, parseHTMLSuggestions]);
@@ -74,11 +85,11 @@ export default function Home() {
         ? inputValue.substring(0, lastCommaIndex + 1) + " " + selectedSuggestion + inputValue.substring(cursorPosition)
         : selectedSuggestion + inputValue.substring(cursorPosition);
 
-    setQuery("");
     setCurrentInputText(updatedValue);
+    setQuery("");
     setSuggestions([]);
     setActiveIndex(-1);
-    inputRef.current?.blur();
+    setSuggestionText("");
   }, [currentInputText]);
 
 
@@ -90,14 +101,24 @@ export default function Home() {
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setActiveIndex((prev) => (prev - 1 >= 0 ? prev - 1 : suggestions.length - 1));
-    } else if (e.key === "Tab" || e.key === "Enter") {
+    } else if (e.key === "Tab") {
+      e.preventDefault();
+      if (suggestions.length > 0) {
+        updateInputValue(suggestions[0].searchName || suggestions[0].label || "");
+      }
+    }
+    else if (e.key === "Enter") {
       e.preventDefault();
       if (activeIndex >= 0) {
         updateInputValue(suggestions[activeIndex].searchName || suggestions[activeIndex].label || "");
+      } else if (suggestions.length > 0) {
+        updateInputValue(suggestions[0].searchName || suggestions[0].label || "");
       }
-    } else if (e.key === "Escape") {
+    }
+    else if (e.key === "Escape") {
       setSuggestions([]);
       setActiveIndex(-1);
+      setSuggestionText("");
       inputRef.current?.blur();
     }
   };
@@ -117,25 +138,43 @@ export default function Home() {
 
     setQuery(currentQuery);
     setActiveIndex(-1);
+    setSuggestionText("");
   }, []);
 
 
   return (
       <Box width="400px" mx="auto" mt="50px" position="relative">
-        <Input
-            ref={inputRef}
-            type="text"
-            value={currentInputText}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder="Cari tag..."
-            size="md"
-            borderRadius="md"
-            borderColor="gray.300"
-            _focus={{ borderColor: "blue.500", boxShadow: "outline" }}
-            color="gray.700"
-            bg="white"
-        />
+        <Box position="relative">
+          <Input
+              ref={inputRef}
+              type="text"
+              value={currentInputText}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder="Cari tag..."
+              size="md"
+              borderRadius="md"
+              borderColor="gray.300"
+              _focus={{ borderColor: "blue.500", boxShadow: "outline" }}
+              color="gray.700"
+              bg="white"
+          />
+          {suggestionText && query && suggestions.length > 0 && suggestions[0].label?.startsWith(query) && (
+              <Text
+                  position="absolute"
+                  left="0"
+                  top="0"
+                  px="3"
+                  py="2"
+                  pointerEvents="none"
+                  color="gray.400"
+                  userSelect="none"
+              >
+                {currentInputText}<Text as="span" color="gray.400">{suggestionText}</Text>
+              </Text>
+          )}
+        </Box>
+
         {suggestions.length > 0 && (
             <Box
                 ref={listRef}
